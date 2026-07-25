@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "StreamsTestApp": {
+      "commandName": "Project",
+      "commandLineArgs": "file download"
+    }
+  }
+}
