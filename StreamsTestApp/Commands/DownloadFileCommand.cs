@@ -2,7 +2,6 @@
 using Spectre.Console.Cli;
 using StreamsTestApp.Extensions;
 using System.ComponentModel;
-using System.Text;
 
 
 namespace StreamsTestApp.Commands
@@ -12,15 +11,16 @@ namespace StreamsTestApp.Commands
     {
         private readonly IAnsiConsole _ansiConsole;
 
-        public DownloadFileCommand(IAnsiConsole ansiConsole)
+        private readonly IHttpClientFactory _httpClientFactory;
+
+        public DownloadFileCommand(IAnsiConsole ansiConsole, IHttpClientFactory httpClientFactory)
         {
             _ansiConsole = ansiConsole;
+            _httpClientFactory = httpClientFactory;
         }
 
         protected override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
         {
-            Console.WriteLine();
-
             var url = _ansiConsole.Prompt(new TextPrompt<string>("Download a file at: "));
 
             if (string.IsNullOrWhiteSpace(url))
@@ -29,11 +29,7 @@ namespace StreamsTestApp.Commands
                 return -1;
             }
 
-            string? defaultDownloadFolderPath = null;
-            if (OperatingSystem.IsWindows())
-            {
-                defaultDownloadFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-            }
+            string? defaultDownloadFolderPath = GetDefaultDownloadFolderForCurrentOS();
            
             var path = _ansiConsole.Prompt(new TextPrompt<string?>("To what directory you want it to be saved?").DefaultValue(defaultDownloadFolderPath));
 
@@ -54,39 +50,9 @@ namespace StreamsTestApp.Commands
             {
                 _ansiConsole.WriteLine("Start downloading...");
 
-                using var httpClient = new HttpClient();
+                var filePath = await DownloadFile(url, path, cancellationToken);
 
-                using var response = await httpClient.GetAsync(url);
-
-                var contentLenght = response.Content.Headers.ContentLength;
-
-                var contentDispositionFileName = response.Content.Headers?.ContentDisposition?.FileName;
-
-                var urlFileName = new Uri(url).Segments.LastOrDefault();
-
-                string fileName = contentDispositionFileName ?? urlFileName ?? $"downlaoded-file-{Guid.NewGuid()}";
-
-                await using var responseStream = await response.Content.ReadAsStreamAsync();
-
-                using var fileStream = File.Open(Path.Combine(path, fileName), FileMode.OpenOrCreate);
-
-                long totalBytesRead = 0;
-                await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize: 8 * 1024 * 8, bytesReadProgressCallback: (long bytesRead) => {
-
-                    totalBytesRead += bytesRead;
-                    StringBuilder stringBuilder = new();
-
-                    stringBuilder.Append($"Read: {bytesRead} bytes. ");
-
-                    if (contentLenght != null)
-                    {
-                        stringBuilder.Append($"Downloaded: {((double)totalBytesRead / contentLenght * 100):F2}%");
-                    }
-
-                    _ansiConsole.WriteLine(stringBuilder.ToString());
-                });
-
-                _ansiConsole.WriteLine($"Downloading finished! The file is at: {Path.Combine(path, fileName)}");
+                _ansiConsole.WriteLine($"Downloading finished! The file is at: {filePath}");
                 
             }
             catch (Exception ex)
@@ -97,5 +63,72 @@ namespace StreamsTestApp.Commands
 
             return 0;
         }
+
+        private string? GetDefaultDownloadFolderForCurrentOS()
+        {
+            string? defaultDownloadFolderPath = null;
+            if (OperatingSystem.IsWindows())
+            {
+                defaultDownloadFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            }
+
+            return defaultDownloadFolderPath;
+        }
+        private async Task<string> DownloadFile(string url, string path, CancellationToken cancellationToken = default)
+        {
+            using var httpClient = _httpClientFactory.CreateClient();
+
+            using var response = await httpClient.GetAsync(url, cancellationToken);
+
+            var contentLenght = response.Content.Headers.ContentLength;
+
+            var contentDispositionFileName = response.Content.Headers?.ContentDisposition?.FileName;
+
+            var urlFileName = new Uri(url).Segments.LastOrDefault();
+
+            string fileName = contentDispositionFileName ?? urlFileName ?? $"downlaoded-file-{Guid.NewGuid()}";
+
+            await using var responseStream = await response.Content.ReadAsStreamAsync();
+
+            using var fileStream = File.Open(Path.Combine(path, fileName), FileMode.OpenOrCreate);
+
+            if (contentLenght != null)
+            {
+                long totalBytesRead = 0;
+
+                await _ansiConsole.Progress().StartAsync(async (ctx) =>
+                {
+                    var task = ctx.AddTask("Downloading a file", maxValue: 100);
+
+                    await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize: 8 * 1024 * 8, bytesReadProgressCallback: (long bytesRead) => {
+
+                        totalBytesRead += bytesRead;
+
+                        double percent = 100 * totalBytesRead / (double)contentLenght;
+                        task.Value(percent);
+                        Thread.Sleep(50);
+
+                    }, cancellationToken: cancellationToken);
+
+                    task.Value = 100;
+                    task.StopTask();
+                });
+            }
+            else
+            {
+                await _ansiConsole.Status().StartAsync("Downloading a file", async (ctx) =>
+                {
+                    ctx.Spinner(Spinner.Known.Star2);
+
+                    await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize: 8 * 1024 * 8, cancellationToken: cancellationToken, bytesReadProgressCallback: (bytesRead) =>
+                    {
+                        Thread.Sleep(50);
+                    });
+                });
+            }
+
+            return Path.Combine(path, fileName);
+        }
+
     }
 }

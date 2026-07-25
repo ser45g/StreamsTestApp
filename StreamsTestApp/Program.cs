@@ -5,16 +5,17 @@ using Spectre.Console.Cli;
 using StreamsTestApp.Commands;
 using StreamsTestApp.Helpers;
 
-IServiceCollection services = null!;
+IServiceCollection serviceCollection = null!;
 
-IHost _host = Host.CreateDefaultBuilder().ConfigureServices((hostContext, s) =>
+IHost _host = Host.CreateDefaultBuilder().ConfigureServices((hostContext, services) =>
 {
     //register services here
+    services.AddHttpClient();
 
-    services = s;
+    serviceCollection = services;
 }).Build();
 
-var registrar = new DITypeRegistar(services);
+var registrar = new DITypeRegistar(serviceCollection);
 
 var app = new CommandApp(registrar);
 
@@ -37,23 +38,22 @@ app.Configure(config =>
     {
         config.SetExceptionHandler((ex, resolver) =>
         {
-            IAnsiConsole? _ansiConsole = (IAnsiConsole)resolver.Resolve(typeof(IAnsiConsole));
-            _ansiConsole?.WriteException(ex, ExceptionFormats.NoStackTrace | ExceptionFormats.ShortenEverything);
+            object? ansiConsoleObject = resolver?.Resolve(typeof(IAnsiConsole));
+
+            var ansiConsole = ansiConsoleObject as IAnsiConsole;
+
+            ansiConsole?.WriteException(ex, ExceptionFormats.NoStackTrace | ExceptionFormats.ShortenEverything);
 
             return 1;
         });
     });
-
-
 });
 
-// Create a cancellation token source to handle Ctrl+C
 var cancellationTokenSource = new CancellationTokenSource();
 
-// Wire up Console.CancelKeyPress to trigger cancellation
 Console.CancelKeyPress += (_, e) =>
 {
-    e.Cancel = true; // Prevent immediate process termination
+    e.Cancel = true; 
     cancellationTokenSource.Cancel();
     Console.WriteLine("Cancellation requested...");
 };
