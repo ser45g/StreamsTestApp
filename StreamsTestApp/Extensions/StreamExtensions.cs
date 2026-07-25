@@ -4,9 +4,10 @@ namespace StreamsTestApp.Extensions
 {
     public static class StreamExtensions
     {
-        public static async Task CopyToStreamWithProgressAsync(this Stream source, Stream destination, Action<long>? bytesReadProgressCallback=null, CancellationToken cancellationToken = default) {
-            const int bufferSize = 8 * 1024 * 8;
-            byte[] buffer = new byte[bufferSize];//8kb
+        public static async Task CopyToStreamWithProgressAsync(this Stream source, Stream destination, Action<long>? bytesReadProgressCallback=null, int bufferSize = 8096, CancellationToken cancellationToken = default) {
+            
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);//8kb
+            
             int bytesRead;
             try
             {
@@ -18,7 +19,7 @@ namespace StreamsTestApp.Extensions
             }
             finally
             {
-                
+                ArrayPool<byte>.Shared.Return(buffer);
             }
         }
     }
