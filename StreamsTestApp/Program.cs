@@ -1,4 +1,5 @@
 ﻿
+using StreamsTestApp.Extensions;
 
 Console.WriteLine("Download a file at: ");
 
@@ -19,11 +20,25 @@ try
 
     HttpClient httpClient = new HttpClient();
 
-    await using var responseStream = await httpClient.GetStreamAsync(url);
+    using var response = await httpClient.GetAsync(url);
+
+    var contentLenght = response.Content.Headers.ContentLength;
+
+    await using var responseStream = await response.Content.ReadAsStreamAsync();
 
     using var fileStream = File.Open(Path.Combine(path, "downloaded-file"), FileMode.OpenOrCreate);
 
-    await responseStream.CopyToAsync(fileStream);
+    long totalBytesRead = 0;
+    await responseStream.CopyToStreamWithProgressAsync(fileStream, (long bytesRead) => {
+
+        totalBytesRead += bytesRead;
+        Console.WriteLine($"Read: {bytesRead} bytes.");
+
+        if (contentLenght != null)
+        {
+            Console.WriteLine($"Downloaded: {((double)totalBytesRead / contentLenght * 100):F2}%");
+        }
+    });
 
     Console.WriteLine("Downloading finished!");
 }
