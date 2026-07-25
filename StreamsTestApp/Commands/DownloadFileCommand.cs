@@ -2,6 +2,7 @@
 using Spectre.Console.Cli;
 using StreamsTestApp.Extensions;
 using System.ComponentModel;
+using System.Net.Http.Headers;
 
 
 namespace StreamsTestApp.Commands
@@ -67,6 +68,7 @@ namespace StreamsTestApp.Commands
         private string? GetDefaultDownloadFolderForCurrentOS()
         {
             string? defaultDownloadFolderPath = null;
+
             if (OperatingSystem.IsWindows())
             {
                 defaultDownloadFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
@@ -74,6 +76,16 @@ namespace StreamsTestApp.Commands
 
             return defaultDownloadFolderPath;
         }
+
+        private string GetFileName(string url, HttpContentHeaders contentHeaders)
+        {
+            var contentDispositionFileName = contentHeaders?.ContentDisposition?.FileName;
+
+            var urlFileName = new Uri(url).Segments.LastOrDefault();
+
+            return contentDispositionFileName ?? urlFileName ?? $"downlaoded-file-{Guid.NewGuid()}";
+        }
+
         private async Task<string> DownloadFile(string url, string path, CancellationToken cancellationToken = default)
         {
             using var httpClient = _httpClientFactory.CreateClient();
@@ -82,13 +94,9 @@ namespace StreamsTestApp.Commands
 
             var contentLenght = response.Content.Headers.ContentLength;
 
-            var contentDispositionFileName = response.Content.Headers?.ContentDisposition?.FileName;
+            var fileName = GetFileName(url, response.Content.Headers);
 
-            var urlFileName = new Uri(url).Segments.LastOrDefault();
-
-            string fileName = contentDispositionFileName ?? urlFileName ?? $"downlaoded-file-{Guid.NewGuid()}";
-
-            await using var responseStream = await response.Content.ReadAsStreamAsync();
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
 
             using var fileStream = File.Open(Path.Combine(path, fileName), FileMode.OpenOrCreate);
 
@@ -106,7 +114,6 @@ namespace StreamsTestApp.Commands
 
                         double percent = 100 * totalBytesRead / (double)contentLenght;
                         task.Value(percent);
-                        Thread.Sleep(50);
 
                     }, cancellationToken: cancellationToken);
 
@@ -120,10 +127,7 @@ namespace StreamsTestApp.Commands
                 {
                     ctx.Spinner(Spinner.Known.Star2);
 
-                    await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize: 8 * 1024 * 8, cancellationToken: cancellationToken, bytesReadProgressCallback: (bytesRead) =>
-                    {
-                        Thread.Sleep(50);
-                    });
+                    await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize: 8 * 1024 * 8, cancellationToken: cancellationToken);
                 });
             }
 
