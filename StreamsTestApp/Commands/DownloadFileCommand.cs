@@ -104,7 +104,7 @@ namespace StreamsTestApp.Commands
             {
                 long totalBytesRead = 0;
 
-                await _ansiConsole.Progress().StartAsync(async (ctx) =>
+                await _ansiConsole.Progress().Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(), new RemainingTimeColumn()).StartAsync(async (ctx) =>
                 {
                     var task = ctx.AddTask("Downloading a file", maxValue: 100);
 
