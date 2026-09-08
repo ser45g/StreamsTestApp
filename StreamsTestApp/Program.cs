@@ -1,82 +1,65 @@
-﻿using StreamsTestApp.Extensions;
-using System.Text;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Spectre.Console;
+using Spectre.Console.Cli;
+using StreamsTestApp.Commands;
+using StreamsTestApp.Helpers;
 
-Console.WriteLine("Download a file at: ");
+IServiceCollection serviceCollection = null!;
 
-var url = Console.ReadLine();
-
-if (string.IsNullOrWhiteSpace(url))
+IHost _host = Host.CreateDefaultBuilder().ConfigureServices((hostContext, services) =>
 {
-    Console.WriteLine("Please, enter url");
-    return;
-}
+    //register services here
+    services.AddHttpClient();
 
-string? defaultDownloadFolderPath = null;
-if (OperatingSystem.IsWindows())
+    serviceCollection = services;
+}).Build();
+
+var registrar = new DITypeRegistar(serviceCollection);
+
+var app = new CommandApp(registrar);
+
+app.SetDefaultCommand<DownloadFileCommand>();
+
+app.Configure(config =>
 {
-    defaultDownloadFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-}
-Console.WriteLine($"To what directory you want it to be saved({defaultDownloadFolderPath??""}):");
+    config.SetApplicationName("file-downloader");
+    config.ValidateExamples();
+    config.AddExample("file", "download");
 
-var path = Console.ReadLine();
-
-if (string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(defaultDownloadFolderPath))
-{
-    path = defaultDownloadFolderPath;
-} 
-
-if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-{
-    Console.WriteLine("No such directory, try again.");
-    return;
-}
-
-Console.WriteLine($"Saving to: {path}");
-
-try
-{
-    Console.WriteLine("Start downloading...");
-
-    using var httpClient = new HttpClient();
-
-    using var response = await httpClient.GetAsync(url);
-
-    var contentLenght = response.Content.Headers.ContentLength;
-
-    var contentDispositionFileName = response.Content.Headers?.ContentDisposition?.FileName;
-
-    var urlFileName = new Uri(url).Segments.LastOrDefault();
-
-    string fileName = contentDispositionFileName ?? urlFileName ?? $"downlaoded-file-{Guid.NewGuid()}";
-
-    await using var responseStream = await response.Content.ReadAsStreamAsync();
-
-    using var fileStream = File.Open(Path.Combine(path, fileName), FileMode.OpenOrCreate);
-
-    long totalBytesRead = 0;
-    await responseStream.CopyToStreamWithProgressAsync(fileStream, bufferSize:8*1024*8, bytesReadProgressCallback: (long bytesRead) => {
-
-        totalBytesRead += bytesRead;
-        StringBuilder stringBuilder = new();
-
-        stringBuilder.Append($"Read: {bytesRead} bytes. ");
-
-        if (contentLenght != null)
-        {   
-            stringBuilder.Append($"Downloaded: {((double)totalBytesRead / contentLenght * 100):F2}%");
-        }
-
-        Console.WriteLine(stringBuilder.ToString());
+    config.AddBranch<CommandSettings>("file", fileBranch =>
+    {
+        fileBranch.SetDescription("Working with files");
+        fileBranch.AddCommand<DownloadFileCommand>("download");
     });
 
-    Console.WriteLine($"Downloading finished! The file is at: {Path.Combine(path, fileName)}");
-}
-catch(Exception ex)
+    
+    app.Configure(config =>
+    {
+        config.SetExceptionHandler((ex, resolver) =>
+        {
+            object? ansiConsoleObject = resolver?.Resolve(typeof(IAnsiConsole));
+
+            var ansiConsole = ansiConsoleObject as IAnsiConsole;
+
+            ansiConsole?.WriteException(ex, ExceptionFormats.NoStackTrace | ExceptionFormats.ShortenEverything);
+
+            return 1;
+        });
+    });
+});
+
+var cancellationTokenSource = new CancellationTokenSource();
+
+Console.CancelKeyPress += (_, e) =>
 {
-    Console.WriteLine("Couldn't download a file!");
-}
+    e.Cancel = true; 
+    cancellationTokenSource.Cancel();
+    Console.WriteLine("Cancellation requested...");
+};
 
+_host.Start();
 
-
-
+await app.RunAsync(args, cancellationToken: cancellationTokenSource.Token);
 

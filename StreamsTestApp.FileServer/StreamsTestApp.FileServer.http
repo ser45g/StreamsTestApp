@@ -1,0 +1,6 @@
+@StreamsTestApp.FileServer_HostAddress = http://localhost:5160
+
+GET {{StreamsTestApp.FileServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
